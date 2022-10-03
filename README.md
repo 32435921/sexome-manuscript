@@ -24,6 +24,7 @@ sexome-manuscript/
 ├── output/
 │   └── Figures
 │   └── seqtab.nochim.csv
+│   └── asv.csv
 │   └── taxa.csv
 │   └── taxatable.csv
 │   └── track.csv
