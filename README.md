@@ -1,4 +1,4 @@
-# sexome-manuscript
+# Sexome Manuscript
 
 Microbiome analysis for sexome microbiome data
 
