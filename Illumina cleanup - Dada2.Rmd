@@ -1,0 +1,235 @@
+---
+title: "Illumina cleanup - Dada2"
+output: html_notebook
+---
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+```{r}
+library(phyloseq); packageVersion("phyloseq")
+library(tidyverse)
+library(dada2); packageVersion("dada2")
+library(csv)
+library(ggplot2); packageVersion("ggplot2")
+pkgs <- c("phyloseq", "tidyverse", "ampvis2", "ampvis2extras", 
+          "ggpubr", "agricolae", "plotly", "viridis", "cowplot", "MicrobeR", 
+          "microbiome", "reshape", "decontam", "data.table", "ape", "DESeq2", 
+          "vegan", "microbiomeutilities", "knitr", "tibble", "dplyr", 
+          "patchwork", "Biostrings", "RColorBrewer", "MicrobiotaProcess")
+lapply(pkgs, require, character.only = TRUE)
+
+theme_set(theme_bw())
+
+```
+
+```{r}
+path <- "Data" # CHANGE ME to the directory containing the fastq files after unzipping.
+list.files(path)
+```
+
+```{r}
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq.gz", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+sample.names
+```
+
+```{r}
+# inspect read quality profiles
+# forward primer
+plotQualityProfile(fnFs[1:4])
+```
+```{r}
+# inspect read quality profiles
+# reverse primer
+plotQualityProfile(fnRs[1:4])
+```
+
+
+
+```{r}
+# Place filtered files in filtered/ subdirectory
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+```
+
+```{r}
+filtFs
+filtRs
+```
+
+
+```{r}
+# change "truncLen=c(300,260)" depending on how many bp you want for forward and reverse. 300bp F due to good quality, 260 R due to poorer quality reverse reads. (common with illumina) 
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(300,260),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=TRUE) 
+head(out)  
+```
+
+```{r}
+# learn errors
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+
+## visualize the estimated error rates:
+
+plotErrors(errF, nominalQ=TRUE)
+```
+
+```{r}
+## We are now ready to apply the core sample inference algorithm to the filtered and trimmed sequence data
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+```
+
+```{r}
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+```
+
+```{r}
+# Inspect the dada-class object from the first sample
+dadaFs[[1]]
+```
+
+```{r}
+# Merge paired reads
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+```
+
+```{r}
+# construct ASV table
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+```
+
+
+```{r}
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab)))
+```
+
+```{r}
+# Remove chimeras 
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+write.csv(seqtab.nochim, "Output/seqtab.nochim.csv")
+```
+
+
+```{r}
+sum(seqtab.nochim)/sum(seqtab)
+```
+
+
+
+
+```{r}
+#As a final check of our progress, we’ll look at the number of reads that made it through each step in the pipeline:
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+track
+write.csv(track, "Output/track.csv")
+```
+
+
+```{r}
+# assign taxonomy
+taxa <- assignTaxonomy(seqtab.nochim, "Data/silva_nr_v132_train_set.fa", multithread=TRUE)
+taxa <- addSpecies(taxa, "Data/silva_species_assignment_v132.fa")
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+# save rda
+save(taxa, file = "taxa.RData")
+write.csv(taxa, "Output/taxa.csv")
+```
+
+
+```{r}
+seqtab.nochim <- read_csv("Output/seqtab.nochim-siobhon.csv")
+```
+
+```{r}
+seqtab.nochim <- column_to_rownames(seqtab.nochim, var = "...1")
+otumat <- as.matrix(seqtab.nochim)
+```
+
+```{r}
+taxa <- read_csv("Output/taxa-siobhon.csv")
+```
+
+```{r}
+taxa <- column_to_rownames(taxa, var = "...1")
+taxmat <- as.matrix(taxa)
+class(otumat)
+class(taxmat)
+class(taxa)
+```
+
+```{r}
+OTU <- otu_table(otumat, taxa_are_rows = FALSE)
+TAX <- tax_table(taxmat)
+TAX <- tax_table<-(taxmat)
+data.class(TAX)
+```
+
+##### Code below not yet used - error in line 182 ########
+
+
+
+```{r}
+ps <- phyloseq(OTU, TAX)
+ps
+sample_names(ps)
+```
+
+
+
+```{r}
+library(readr)
+metadata <- read_csv("metadata.csv")
+view(metadata)
+```
+
+
+```{r}
+sampledata <- as.data.frame(metadata)
+rownames(sampledata) <- sampledata$Sample_ID
+sampledata <- sample_data(data.frame(sampledata))
+
+#Add in fasta sequence data for ASVs
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+
+# now merge these into existing phyloseq object
+ps_aus <- merge_phyloseq(ps, sampledata, dna)
+taxa_names(ps_aus) <- paste0("ASV", seq(ntaxa(ps_aus)))
+ps_aus
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
