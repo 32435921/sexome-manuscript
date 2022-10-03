@@ -31,4 +31,5 @@ sexome-manuscript/
 ├── RData/
 │   └── ampvis2_aus.RData/
 │   └── ps_aus.RData/
+└── README.md
 ```
