@@ -1,6 +1,6 @@
 # Sexome Manuscript
 
-Microbiome analysis for sexome microbiome data
+Microbiome analysis for sexome microbiome data.
 
 Processing pilot data for manuscript.
 
