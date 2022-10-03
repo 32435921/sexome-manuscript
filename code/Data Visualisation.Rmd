@@ -1,0 +1,1173 @@
+---
+title: "Data Visualisation"
+output: html_document
+---
+
+```{r Load Libraries}
+pkgs <- c("phyloseq", "tidyverse", "ampvis2", "ampvis2extras", 
+          "ggpubr", "agricolae", "plotly", "viridis", "cowplot", "MicrobeR", 
+          "microbiome", "reshape", "decontam", "data.table", "ape", "DESeq2", 
+          "vegan", "microbiomeutilities", "knitr", "tibble", "dplyr", 
+          "patchwork", "Biostrings", "RColorBrewer", "MicrobiotaProcess")
+lapply(pkgs, require, character.only = TRUE)
+
+theme_set(theme_bw())
+```
+
+```{r Load Data}
+# load data files 
+load("ps_aus.Rdata")
+load("ampvis2_aus.RData")
+```
+
+```{r}
+# require the devtools package to source gist
+if(!require("devtools"))
+  install.packages("devtools")
+#source the phyloseq_to_ampvis2() function from the gist
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+
+# convert to ampvis2 and then save
+ampvis2_aus <- phyloseq_to_ampvis2(ps_aus)
+save(ampvis2_aus, file = "ampvis2_aus.RData")
+```
+
+```{r}
+# Make ggplot-friendly data.frame
+df <- as.data.frame(sample_data(ps_aus)) 
+df$LibrarySize <- sample_sums(ps_aus)
+df <- df[order(df$LibrarySize), ]
+df$Index <- seq(nrow(df))
+mycols <- c("brown3", "steelblue")
+libQC <-
+  ggplot(data = df, aes(x = Index, y = LibrarySize, color = Sex)) + geom_point() +
+  scale_color_manual(values = mycols)
+ggsave("libQC.pdf",
+  plot = libQC,
+  path = "Figures",
+  width = 10,
+  height = 10,
+  units = "cm")
+libQC
+```
+
+
+```{r}
+#Make distribution plot of reads using microbiomeutilities
+distrib <-
+  plot_read_distribution(ps_aus, groups = "Sex", plot.type = "density") +
+  xlab("Reads per sample") + ylab("Density")
+distrib <- distrib + geom_density(alpha = 0.5, fill = "grey")
+ggsave(
+  "distrib.pdf",
+  plot = distrib,
+  path = "Figures",
+  width = 15,
+  height = 10,
+  units = "cm")
+distrib
+```
+
+
+```{r}
+# inspect the number of reads
+readsumsdf = data.frame(nreads = sort(taxa_sums(ps_aus), TRUE),
+  sorted = 1:ntaxa(ps_aus),
+  type = "ASVs")
+readsumsdf = rbind(readsumsdf,data.frame(nreads = sort(sample_sums(ps_aus),
+   TRUE),sorted = 1:nsamples(ps_aus),type = "Samples"))
+title = "Total Number of Reads"
+nreads = ggplot(readsumsdf, aes(x = sorted, y = nreads)) + geom_bar(stat = "identity")
+nreads = nreads + ggtitle(title) + scale_y_log10() +
+  facet_wrap( ~ type, 1, scales = "free")
+ggsave(
+  "nreads.pdf",
+  plot = nreads,
+  path = "Figures",
+  width = 15,
+  height = 10,
+  units = "cm")
+nreads
+```
+
+
+```{r Rarefaction}
+# males
+# set seed
+set.seed(1)
+# set subsample
+subsamples = c(10,
+               1000,
+               2000,
+               3000,
+               4000,
+               5000,
+               6000,
+               7000,
+               8000,
+               9000,
+               10000,
+               11000,
+               12000)
+ps_male <- subset_samples(ps_aus, Sex = "M")
+rarecurve_M <- plot_alpha_rcurve(
+  ps_male,
+  index = "observed",
+  subsamples = subsamples,
+  lower.conf = 0.025,
+  upper.conf = 0.975,
+  group = "Sample_time",
+  label.color = "brown3",
+  label.size = 3,
+  label.min = TRUE)
+# change color of line
+mycols <- c("brown3", "steelblue")
+rarecurve_M <- rarecurve_M + scale_color_manual(values = mycols) +
+  scale_fill_manual(values = mycols) + labs(title = "Male") +
+  ylab("Number of ASVs") + xlab("Sequencing Depth (Reads)")
+```
+
+```{r}
+# females
+# set seed
+set.seed(1)
+# set subsample
+subsamples = c(10,
+               1000,
+               2000,
+               3000,
+               4000,
+               5000,
+               6000,
+               7000,
+               8000,
+               9000,
+               10000,
+               11000,
+               12000)
+ps_female <- subset_samples(ps_aus, Sex = "F")
+rarecurve_F <- plot_alpha_rcurve(
+  ps_male,
+  index = "observed",
+  subsamples = subsamples,
+  lower.conf = 0.025,
+  upper.conf = 0.975,
+  group = "Sample_time",
+  label.color = "brown3",
+  label.size = 3,
+  label.min = TRUE)
+# change color of line
+mycols <- c("brown3", "steelblue")
+rarecurve_F <- rarecurve_F + scale_color_manual(values = mycols) +
+  scale_fill_manual(values = mycols) + labs(title = "Female") +  ylab("Number of ASVs") + xlab("Sequencing Depth (Reads)")
+rarecurve_F
+```
+
+```{r}
+#combine plots
+rare_wp <- ggarrange(rarecurve_M, rarecurve_F, nrow = 2)
+ggsave(
+  "rare_wp.pdf",
+  plot = rare_wp,
+  path = "Figures",
+  width = 20,
+  height = 20,
+  units = "cm")
+rare_wp
+```
+
+
+```{r Alpha Diversity}
+mycols = c("brown3", "steelblue")
+obs_alpha_plot <- plot_diversity_stats(ps_M, group = "Circumcised", 
+                            index = "observed",
+                            label.format="p.format",
+                            group.colors = mycols,
+                            stats = TRUE)
+obs_alpha_plot <- obs_alpha_plot + ylab("No. Observed ASVs") + labs(title = "Observed")
+chao1_alpha_plot <- plot_diversity_stats(ps_M, group = "Circumcised",
+                            index = "chao1",
+                            label.format="p.format",
+                            group.colors = mycols,
+                            stats = TRUE)
+chao1_alpha_plot <- chao1_alpha_plot + ylab("Chao1 Index") + labs(title = "Chao1")
+shan_alpha_plot <- plot_diversity_stats(ps_M, group = "Circumcised", 
+                            index = "diversity_shannon",
+                            label.format="p.format",
+                            group.colors = mycols,
+                            stats = TRUE)
+shan_alpha_plot <- shan_alpha_plot + ylab("Shannon Index")+ labs(title = "Shannon")
+invsimp_alpha_plot <- plot_diversity_stats(ps_M, group = "Circumcised", 
+                            index = "diversity_inverse_simpson",
+                            label.format="p.format",
+                            group.colors = mycols,
+                            stats = TRUE)
+invsimp_alpha_plot <- invsimp_alpha_plot + ylab("Inverse Simpson Index") + labs(title = "Inverse Simpson")
+alphadiv_wp <- ggarrange(obs_alpha_plot, chao1_alpha_plot,
+                         shan_alpha_plot, invsimp_alpha_plot,
+                         ncol = 2, nrow = 2)
+# Save combined plot
+ggsave("alphadiv_wp_M.pdf", plot = alphadiv_wp, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+alphadiv_wp
+```
+
+
+```{r Taxonomy}
+# distribution plots
+# subset females
+ps_F <- subset_samples(ps_aus, Sex=="F")
+
+## Female before
+ps_F_B <- subset_samples(ps_F, Sample_time=="Before")
+ps_F_B_dis <- taxa_distribution(ps_F_B) + 
+  theme_biome_utils() + 
+  labs(title = "Female Before") + ylab("Density") + xlab("Phylum Counts (log10)")
+
+## Female after
+ps_F_A <- subset_samples(ps_F, Sample_time=="After")
+ps_F_A_dis <- taxa_distribution(ps_F_A) + 
+  theme_biome_utils() + 
+  labs(title = "Female After") + ylab("Density") + xlab("Phylum Counts (log10)")
+
+# subset males
+ps_M <- subset_samples(ps_aus, Sex=="M")
+
+## Male before
+ps_M_B <- subset_samples(ps_M, Sample_time=="Before")
+ps_M_B_dis <- taxa_distribution(ps_M_B) + 
+  theme_biome_utils() + 
+  labs(title = "Male Before") + ylab("Density") + xlab("Phylum Counts (log10)")
+
+## Male after
+ps_M_A <- subset_samples(ps_M, Sample_time=="After")
+ps_M_A_dis <- taxa_distribution(ps_M_A) + 
+  theme_biome_utils() + 
+  labs(title = "Male After") + ylab("Density") + xlab("Phylum Counts (log10)")
+
+# Merge the plots together for publication ready figures!
+phylum_distrib = ggarrange(ps_F_B_dis, ps_F_A_dis, ps_M_B_dis, ps_M_A_dis, 
+                           ncol = 2, nrow = 2)
+
+# Save plot
+ggsave("phylum_distribl.pdf", plot = phylum_distrib, path = "Figures", 
+       width = 30, height = 30, units = "cm")
+
+phylum_distrib
+```
+
+
+```{r}
+mycols <- c("brown3", "steelblue")
+grp_abund <- get_group_abundances(ps_aus, 
+                                  level = "Genus", 
+                                  group="Sex",
+                                  transform = "compositional")
+mean.plot.ord <- grp_abund %>% # input data
+  ggplot(aes(x= reorder(OTUID, mean_abundance), # reorder based on mean abundance
+             y= mean_abundance,
+             fill=Sex)) + # x and y axis 
+  geom_bar(stat = "identity",
+           position=position_dodge()) + 
+  scale_fill_manual("Group", values=mycols) + # manually specify colors
+  theme_bw() + # add a widely used ggplot2 theme
+  ylab("Mean Relative Abundance") + # label y axis
+  xlab("Order") + # label x axis
+  coord_flip() # rotate plot 
+ggsave("mean.plot.ord.pdf", plot = mean.plot.ord, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+mean.plot.ord
+```
+
+```{r}
+# write abundance CSV sheets to inspect 
+# overall 
+mycols <- c("brown3", "steelblue")
+abund_FA <- get_group_abundances(ps_F, 
+                                  level = "Genus", 
+                                 group = "Sample_time",
+                                  transform = "compositional")
+write.csv(abund_FA, file = "abund_F.csv")
+
+abund_M <- get_group_abundances(ps_M, 
+                                  level = "Genus", 
+                                 group = "Sample_time",
+                                  transform = "compositional")
+write.csv(abund_M, file = "abund_M.csv")
+
+# couple 6 
+abund_couple6B <- get_group_abundances(couple6_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple6B, file = "Abundance/abund_couple6B.csv")
+
+abund_couple6A <- get_group_abundances(couple6_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple6A, file = "Abundance/abund_couple6A.csv")
+
+# couple 9
+abund_couple9B <- get_group_abundances(couple9_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple9B, file = "Abundance/abund_couple9B.csv")
+
+abund_couple9A <- get_group_abundances(couple9_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple9A, file = "Abundance/abund_couple9A.csv")
+
+# couple 13 
+abund_couple13B <- get_group_abundances(couple13_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple13B, file = "Abundance/abund_couple13B.csv")
+
+abund_couple13A <- get_group_abundances(couple13_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple13A, file = "Abundance/abund_couple13A.csv")
+
+# couple 14 
+abund_couple14B <- get_group_abundances(couple14_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple14B, file = "Abundance/abund_couple14B.csv")
+
+abund_couple14A <- get_group_abundances(couple14_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple14A, file = "Abundance/abund_couple14A.csv")
+
+# couple 17 
+abund_couple17B <- get_group_abundances(couple17_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple17B, file = "Abundance/abund_couple17B.csv")
+
+abund_couple17A <- get_group_abundances(couple17_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple17A, file = "Abundance/abund_couple17A.csv")
+
+# couple 19 
+abund_couple19B <- get_group_abundances(couple19_before, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple19B, file = "Abundance/abund_couple19B.csv")
+
+abund_couple19A <- get_group_abundances(couple19_after, 
+                                  level = "Genus", 
+                                 group = "Sex",
+                                  transform = "compositional")
+write.csv(abund_couple19A, file = "Abundance/abund_couple19A.csv")
+```
+
+
+```{r}
+# top taxa
+mycols <- c("brown3", "steelblue")
+top9_fam <- plot_taxa_boxplot(ps_aus,
+                        taxonomic.level = "Family",
+                        top.otu = 9, 
+                        group = "Sex",
+                        add.violin= FALSE,
+                        title = "Top nine family", 
+                        keep.other = FALSE,
+                        group.order = c("F","M"),
+                        group.colors = mycols,
+                        dot.size = 1)
+top9_fam <- top9_fam + theme_biome_utils()
+```
+
+
+```{r}
+comps <- make_pairs(sample_data(ps_aus)$Sex)
+print(comps)
+```
+
+```{r}
+# perform statistical tests
+top9_fam_stats <- top9_fam + stat_compare_means(
+      comparisons = comps,
+      label = "p.format",
+      tip.length = 0.05,
+      method = "wilcox.test")
+top9_fam_stats <- top9_fam_stats + scale_y_continuous(labels = scales::percent)
+# save plot
+ggsave("top9_fam_stats.pdf", plot = top9_fam_stats, path = "Figures", 
+       width = 25, height = 30, units = "cm")
+top9_fam_stats
+```
+
+```{r}
+library(pheatmap)
+
+# create a gradient color palette for abundance
+grad_ab <- colorRampPalette(c("#96d4ca","#d3f3f1", "#7c65a9"))
+grad_ab_pal <- grad_ab(10)
+
+# create a color palette for variables of interest
+meta_colors <- list(c("Before" = "grey50", 
+                      "After" = "black"), 
+                    c("F" = "brown3", 
+                      "M" = "steelblue"),
+                    c("6" = "#000004FF",
+                      "9" = "#420A68FF",
+                      "13" = "#932667FF",
+                      "14" = "#DD513AFF",
+                      "17" = "#FCA50AFF",
+                      "19" = "#FCFFA4FF"))
+# add labels for pheatmap to detect
+names(meta_colors) <- c("Sample_time", "Sex", "Couple_id")
+
+heatmap <- plot_taxa_heatmap(ps_aus,
+                       subset.top = 20,
+                       VariableA = c("Sample_time","Sex", "Couple_id"),
+                       heatcolors = colorRampPalette(rev(brewer.pal(n = 7, name = "RdPu")))(100),
+                       transformation = "log10",
+                       cluster_rows = T,
+                       cluster_cols = F,
+                       show_colnames = F,
+                       annotation_colors=meta_colors)
+heatmap
+# Save plot
+ggsave("heatmap.pdf", plot = heatmap$plot, path = "Figures", 
+       width = 25, height = 30, units = "cm")
+```
+
+
+```{r}
+ampvis2_aus$metadata$Sample_time <-factor(ampvis2_aus$metadata$Sample_time, levels = unique(ampvis2_aus$metadata$Sample_time)[c(1,2)])
+ampheatmap = amp_heatmap(ampvis2_aus,
+                         group_by = "Sex",
+                         facet_by = "Couple_id",
+                         plot_values = FALSE,
+                         tax_show = 30,
+                         showRemainingTaxa = TRUE,
+                         tax_aggregate = "Genus",
+                         tax_add = "Phylum",
+                         color_vector = c("white","#731c78","#7c65a9"),
+                         plot_colorscale = "sqrt",
+                         plot_legendbreaks = c(1, 5, 10),
+                         plot_functions = FALSE)
+ampheatmap
+```
+
+```{r}
+ampheatmap2 = amp_heatmap(ampvis2_aus,
+                          group = c("Sample_time"),
+                          facet_by = c("Couple_id", "Sex"),
+                          plot_values = FALSE,
+                          tax_show = 300,
+                          showRemainingTaxa = TRUE,
+                          tax_aggregate = "Species",
+                          tax_add = "Genus",
+                          tax_empty = "OTU",
+                          color_vector = c("white", "#96d4ca","#d3f3f1", "#7c65a9"),
+                          plot_colorscale = "sqrt",
+                          plot_legendbreaks = c(1, 5, 10),
+                          plot_functions = FALSE)
+ampheatmap2
+ggsave("ampvis2_allspecies.pdf", plot = ampheatmap2, path = "Figures", width = 25, height = 125, units = "cm")
+```
+
+
+```{r Beta Divesity}
+set.seed(4235421)
+mycols = plasma(7)
+# bray curtis PCoA
+ord.pcoa.bray <- ordinate(ps_aus, "PCoA", "bray")
+ord_PCoA_bray = plot_ordination(ps_aus, ord.pcoa.bray, color = "Couple_id", shape="Sex") + geom_text(aes(label = Sample_time), size = 2, vjust = 2.4) + geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "(a) Bray-Curtis PCoA", color = "Couple")
+ord_PCoA_bray                                                                                             
+ggsave("ord_PCoA_bray.pdf", plot = ord_PCoA_bray, path = "Figures",
+       width = 20, height = 20, units = "cm")
+ord_PCoA_bray
+```
+
+```{r}
+# jaccard PCoA
+ord.pcoa.jac <- ordinate(ps_aus, "PCoA", "jaccard")
+ord_PCoA_jac = plot_ordination(ps_aus, ord.pcoa.jac, color = "Couple_id", shape="Sex") + geom_text(aes(label = Sample_time), size = 2, vjust = 2.4) + geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "(b) PCoA Using Jaccard Distance Measure")
+ggsave("ord_PCoA_jac.pdf", plot = ord_PCoA_jac, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+ord_PCoA_jac
+```
+
+
+```{r}
+# DCA using chi squared PCoA
+ord.dca <- ordinate(ps_aus, "DCA")
+ord_DCA = plot_ordination(ps_aus, ord.dca, color = "Couple_id", shape="Sex") +
+                geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "(a) DCA Using Chi-Squared Distance")
+ggsave("ord_DCA.pdf", plot = ord_DCA, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+ord_DCA
+```
+
+```{r}
+# CCA using pearson chi squared PCoA
+ord_CCA <- plot_ordination(ps_aus, pseq.cca, color = "Couple_id", shape="Sex") +
+                geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse()
+ord_CCA <- ord_CCA + geom_point(size = 4) + 
+  scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "CCA Using Pearson Chi-Squared Distance")
+ggsave("ord_CCA.pdf", plot = ord_CCA, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+ord_CCA
+```
+
+```{r}
+# unweighted unifrac pcoa
+ord_pcoa_ufuw <- ordinate(ps_aus, "PCoA", "unifrac", weighted=FALSE)
+ord_PCoA_ufuw = plot_ordination(ps_aus, ord_pcoa_ufuw, color = "Couple_id", shape="Sex") +
+                geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "(a) PCoA Using Un-Weighted Unifrac Distance Measure")
+# Save
+ggsave("ord_PCoA_ufuw.pdf", plot = ord_PCoA_ufuw, path = "figures", 
+       width = 20, height = 20, units = "cm")
+ord_PCoA_ufuw
+```
+
+
+```{r}
+# weighted unifrac pcoa
+ord_pcoa_ufw <- ordinate(ps_aus, "PCoA", "unifrac", weighted=TRUE)
+ord_PCoA_ufw = plot_ordination(ps_aus, ord_pcoa_ufw, color = "Couple_id", shape="Sex") + geom_text(aes(label = Sample_time), size = 2, vjust = 2.4) + 
+                geom_point(size = 5) + scale_color_manual(values=mycols) + stat_ellipse() + labs(title = "(b) Weighted Unifrac PCoA", color = "Couple")  
+# Save
+ggsave("ord_PCoA_ufw.pdf", plot = ord_PCoA_ufw, path = "figures", 
+       width = 20, height = 20, units = "cm")
+ord_PCoA_ufw
+beta <- ggarrange(ord_PCoA_bray, ord_PCoA_ufw, nrow = 2)
+beta
+ggsave("beta graphs.pdf", plot = beta, path = "figures", 
+       width = 20, height = 40, units = "cm")
+```
+
+
+```{r}
+# using microbiota process just processing couple 6 and 17
+sub = subset_samples(ps_aus, Couple_id == "6" | Couple_id == "17")
+mycols = viridis(2, option = "B")
+# If the input was normalized, the method parameter should be setted NULL.
+pcoares <- get_pcoa(obj=sub, method="hellinger", distmethod="bray")
+# Visulizing the result
+pcoaplot1 <- ggordpoint(obj=pcoares, biplot=TRUE, speciesannot=FALSE, poinsize = 3,
+                       factorNames=c("Couple_id", "Sex"), ellipse=TRUE) +
+  scale_color_manual(values=mycols) +
+  scale_fill_manual(values=mycols)
+# pc = c(1, 3) to show the first and third principal components.
+pcoaplot2 <- ggordpoint(obj=pcoares, pc=c(1, 3), biplot=TRUE, speciesannot=FALSE, poinsize = 3,
+                       factorNames=c("Couple_id", "Sex"), ellipse=TRUE) +
+  scale_color_manual(values=mycols) +
+  scale_fill_manual(values=mycols)
+pcoaplot1 | pcoaplot2
+```
+
+```{r Permutational Analysis of Variance}
+distme <- get_dist(ps_aus, distmethod ="bray", method="hellinger")
+sampleda <- data.frame(sample_data(ps_aus), check.names=FALSE)
+sampleda <- sampleda[match(colnames(as.matrix(distme)),rownames(sampleda)),,drop=FALSE]
+sampleda$Group <- factor(sampleda$Couple_id)
+set.seed(1024)
+adores <- adonis(distme ~ Couple_id, data=sampleda, permutation=9999)
+data.frame(adores$aov.tab)
+```
+
+
+```{r Group Wise Comparison}
+pseq.rel <- microbiome::transform(ps_aus, "compositional")
+otu <- abundances(pseq.rel)
+meta <- meta(pseq.rel)
+```
+
+
+```{r}
+# visualise microbiome variation
+landscape <- plot_landscape(pseq.rel, method = "NMDS", distance = "bray", 
+                            col = "Sex", size = 3)
+ggsave("landscape.pdf", plot = landscape, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+landscape
+```
+
+
+```{r}
+permanova <- adonis(t(otu) ~ Sex,
+                    data = meta, permutations=999, method = "bray")
+
+# P-value
+print(as.data.frame(permanova$aov.tab)["Sex", "Pr(>F)"])
+```
+
+```{r Anova Table}
+dist <- vegdist(t(otu))
+anova(betadisper(dist, meta$Sex))
+```
+
+```{r}
+coef <- coefficients(permanova)["Sex1",]
+top.coef <- coef[rev(order(abs(coef)))[1:20]]
+par(mar = c(3, 14, 2, 1))
+coefficients_plot <- barplot(sort(top.coef), horiz = T, las = 1, main = "Top taxa")
+```
+
+```{r}
+ggsave("coefficients_plot.pdf", plot = coefficients_plot, path = "Figures", width = 20, height = 20, units = "cm")
+
+```
+
+```{r Hierachical Cluster Analysis}
+## All samples - detailed, include sex
+clust_all <- get_clust(obj=ps_aus, distmethod="euclidean",
+                      method="hellinger", hclustmethod="average")
+mycols = c("brown3", "steelblue")
+# circular layout
+clust_sex <- ggclust(obj=clust_all ,
+                      layout = "circular",
+                      pointsize=3,
+                      fontsize=0,
+                      factorNames=c("Sex")) +
+  scale_color_manual(values=mycols) +
+  ggtitle("Hierarchical Cluster Samples (euclidean)")
+ggsave("clust_sex.pdf", plot = clust_sex, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+clust_sex
+```
+
+```{r}
+## All samples - detailed, include Couple_id
+clust_all <- get_clust(obj=ps_aus, distmethod="euclidean",
+                      method="hellinger", hclustmethod="average")
+mycols = viridis(6, option = "B")
+# circular layout
+clust_couple <- ggclust(obj=clust_all ,
+                      layout = "circular",
+                      pointsize=3,
+                      fontsize=0,
+                      factorNames=c("Couple_id")) +
+  scale_color_manual(values=mycols) +
+  ggtitle("Hierarchical Cluster Samples (euclidean)")
+ggsave("clust_couple.pdf", plot = clust_couple, path = "Figures", 
+       width = 20, height = 20, units = "cm")
+clust_couple
+```
+
+```{r Venn Diagrams}
+library(VennDiagram)
+library(UpSetR)
+vennlist <- get_vennlist(obj=ps_aus, factorNames="Sex")
+upsetda <- get_upset(obj=ps_aus, factorNames="Sex")
+vennp <- venn.diagram(vennlist,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Gender Specific and Shared ASVs in Male and Female",
+                      main.cex = 2, 
+                      margin = 0, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp)
+ggsave("venn.pdf", plot = vennp, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 6 Before
+couple6 <- subset_samples(ps_aus, Couple_id =="6")
+couple6_before <- subset_samples(couple6, Sample_time =="Before")
+vennlist6B <- get_vennlist(obj=couple6_before, factorNames="Sex")
+upsetda6B <- get_upset(obj=couple6_before, factorNames="Sex")
+vennp6B <- venn.diagram(vennlist6B,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 6 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp6B)
+ggsave("venn6before.pdf", plot = vennp6B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 6 After
+couple6_after <- subset_samples(couple6, Sample_time =="After")
+vennlist6A <- get_vennlist(obj=couple6_after, factorNames="Sex")
+upsetda6A <- get_upset(obj=couple6_after, factorNames="Sex")
+vennp6A <- venn.diagram(vennlist6A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 6 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp6A)
+ggsave("venn6after.pdf", plot = vennp6A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+
+```{r}
+# Couple 9 Before
+couple9 <- subset_samples(ps_aus, Couple_id =="9")
+couple9_before <- subset_samples(couple9, Sample_time =="Before")
+vennlist9B <- get_vennlist(obj=couple9_before, factorNames="Sex")
+upsetda9B <- get_upset(obj=couple9_before, factorNames="Sex")
+vennp9B <- venn.diagram(vennlist9B,
+                     height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 9 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp9B)
+ggsave("venn9before.pdf", plot = vennp9B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 9 After
+couple9_after <- subset_samples(couple9, Sample_time =="After")
+vennlist9A <- get_vennlist(obj=couple9_after, factorNames="Sex")
+upsetda9A <- get_upset(obj=couple9_after, factorNames="Sex")
+vennp9A <- venn.diagram(vennlist9A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 9 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp9A)
+ggsave("venn9after.pdf", plot = vennp9A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+
+```{r}
+# Couple 13 Before
+couple13 <- subset_samples(ps_aus, Couple_id =="13")
+couple13_before <- subset_samples(couple13, Sample_time =="Before")
+vennlist13B <- get_vennlist(obj=couple13_before, factorNames="Sex")
+upsetda13B <- get_upset(obj=couple13_before, factorNames="Sex")
+vennp13B <- venn.diagram(vennlist13B,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 13 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp13B)
+ggsave("venn13before.pdf", plot = vennp13B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 13 After
+couple13_after <- subset_samples(couple13, Sample_time =="After")
+vennlist13A <- get_vennlist(obj=couple13_after, factorNames="Sex")
+upsetda13A <- get_upset(obj=couple13_after, factorNames="Sex")
+vennp13A <- venn.diagram(vennlist13A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 13 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp13A)
+ggsave("venn13after.pdf", plot = vennp13A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 14 Before
+couple14 <- subset_samples(ps_aus, Couple_id =="14")
+couple14_before <- subset_samples(couple14, Sample_time =="Before")
+vennlist14B <- get_vennlist(obj=couple14_before, factorNames="Sex")
+upsetda14B <- get_upset(obj=couple14_before, factorNames="Sex")
+vennp14B <- venn.diagram(vennlist14B,
+                     height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 14 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp14B)
+ggsave("venn14before.pdf", plot = vennp14B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 14 After
+couple14_after <- subset_samples(couple14, Sample_time =="After")
+vennlist14A <- get_vennlist(obj=couple14_after, factorNames="Sex")
+upsetda14A <- get_upset(obj=couple14_after, factorNames="Sex")
+vennp14A <- venn.diagram(vennlist14A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 14 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp14A)
+ggsave("venn14after.pdf", plot = vennp14A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 17 Before
+couple17 <- subset_samples(ps_aus, Couple_id =="17")
+couple17_before <- subset_samples(couple17, Sample_time =="Before")
+vennlist17B <- get_vennlist(obj=couple17_before, factorNames="Sex")
+upsetda17B <- get_upset(obj=couple17_before, factorNames="Sex")
+vennp17B <- venn.diagram(vennlist17B,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 17 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp17B)
+ggsave("venn17before.pdf", plot = vennp17B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 17 After
+couple17_after <- subset_samples(couple17, Sample_time =="After")
+vennlist17A <- get_vennlist(obj=couple17_after, factorNames="Sex")
+upsetda17A <- get_upset(obj=couple17_after, factorNames="Sex")
+vennp17A <- venn.diagram(vennlist17A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 17 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp17A)
+ggsave("venn17after.pdf", plot = vennp17A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# combine plots for couple 17
+couple17BA <- ggarrange(vennp17B, vennp17A, nrow = 2)
+ggsave(
+  "couple17BA.pdf",
+  plot = couple17BA,
+  path = "figures",
+  width = 20,
+  height = 20,
+  units = "cm"
+)
+```
+
+
+```{r}
+# Couple 19 Before
+couple19 <- subset_samples(ps_aus, Couple_id =="19")
+couple19_before <- subset_samples(couple19, Sample_time =="Before")
+vennlist19B <- get_vennlist(obj=couple19_before, factorNames="Sex")
+upsetda19B <- get_upset(obj=couple19_before, factorNames="Sex")
+vennp19B <- venn.diagram(vennlist19B,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 19 Before",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp19B)
+ggsave("venn19before.pdf", plot = vennp19B, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+```{r}
+# Couple 19 After
+couple19_after <- subset_samples(couple19, Sample_time =="After")
+vennlist19A <- get_vennlist(obj=couple19_after, factorNames="Sex")
+upsetda19A <- get_upset(obj=couple19_after, factorNames="Sex")
+vennp19A <- venn.diagram(vennlist19A,
+                      height=5,
+                      width=5, 
+                      filename=NULL, 
+                      fill=c("brown3", "steelblue"),
+                      cat.col=c("brown3", "steelblue"),
+                      alpha = 0.3, 
+                      fontfamily = "serif",
+                      fontface = "bold",
+                      cex = 1.2,
+                      cat.cex = 1.3,
+                      cat.default.pos = "outer",
+                      cat.dist=0.1,
+                      main = "Couple 19 After",
+                      main.cex = 1, 
+                      margin = 0.1, 
+                      lwd = 3,
+                      lty ='solid',
+                      imagetype = "svg")
+grid::grid.draw(vennp19A)
+ggsave("venn19after.pdf", plot = vennp19A, path = "Figures", 
+       width = 20, height = 10, units = "cm")
+```
+
+
+```{r}
+# save csv files to inspect ASV count data and find uniques
+write.csv(upsetda6B, file = "ASVs_6_Before.csv")
+write.csv(upsetda6A, file = "ASVs_6_After.csv")
+write.csv(upsetda9B, file = "ASVs_9_Before.csv")
+write.csv(upsetda9A, file = "ASVs_9_After.csv")
+write.csv(upsetda13B, file = "ASVs_13_Before.csv")
+write.csv(upsetda13A, file = "ASVs_13_After.csv")
+write.csv(upsetda14B, file = "ASVs_14_Before.csv")
+write.csv(upsetda14A, file = "ASVs_14_After.csv")
+write.csv(upsetda17B, file = "ASVs_17_Before.csv")
+write.csv(upsetda17A, file = "ASVs_17_After.csv")
+write.csv(upsetda19B, file = "ASVs_19_Before.csv")
+write.csv(upsetda19A, file = "ASVs_19_After.csv")
+```
+
+```{r}
+# combine all venn plots for all couples
+allcouples <- ggarrange(vennp6B, vennp6A, vennp9B, vennp9A, vennp13B, vennp13A, vennp14B, vennp14A, vennp17B, vennp17A, vennp19B, vennp19A,  ncol = 2, nrow = 6)
+allcouples
+ggsave(
+  "allcouples.pdf",
+  plot = allcouples,
+  path = "figures",
+  width = 20,
+  height = 25,
+  units = "cm"
+)
+```
+
+```{r Pattern Discovery}
+# for the kruskal_test and wilcox_test
+library(coin)
+library(MicrobiotaProcess)
+# Since the effect size was calculated by randomly re-sampling, 
+# the seed should be set for reproducibly results.
+set.seed(1024)
+deres <- diff_analysis(obj = ps_aus, classgroup = "Sex", subclass = "Couple_id",
+                       mlfun = "lda",
+                       filtermod = "pvalue",
+                       firstcomfun = "kruskal_test",
+                       firstalpha = 0.05,
+                       strictmod = TRUE,
+                       secondcomfun = "wilcox_test",
+                       subclmin = 3,
+                       subclwilc = TRUE,
+                       secondalpha = 0.01,
+                       lda=3)
+deres
+```
+
+```{r}
+diffclade_p <- ggdiffclade(
+                   obj=deres, 
+                   alpha=0.3, 
+                   linewd=0.15,
+                   skpointsize=0.6, 
+                   layout="radial",
+                   taxlevel=3, 
+                   removeUnkown=TRUE,
+                   reduce=TRUE # This argument is to remove the branch of unknown taxonomy.
+               ) +
+               scale_fill_manual(
+                   values=c("brown3", "steelblue")
+               ) +
+               guides(color = guide_legend(
+                                  keywidth = 0.1, 
+                                  keyheight = 0.6,
+                                  order = 3,
+                                  ncol=1)
+               ) +
+               theme(
+                   panel.background=element_rect(fill=NA),
+                   legend.position="right", 
+                   plot.margin=margin(0,0,0,0),
+                   legend.spacing.y=unit(0.02, "cm"), 
+                   legend.title=element_text(size=7),
+                   legend.text=element_text(size=6), 
+                   legend.box.spacing=unit(0.02,"cm")
+               )
+ggsave("diffclade_p.pdf", plot = diffclade_p, path = "Figures", width = 20, height = 20, units = "cm")
+diffclade_p
+```
+
+```{r}
+diffbox <- ggdiffbox(obj=deres, box_notch=FALSE, 
+             colorlist=c("steelblue", "brown3"), l_xlabtext="relative abundance")
+ggsave("diffbox.pdf", plot = diffbox, path = "Figures", width = 20, height = 20, units = "cm")
+diffbox
+```
+
+```{r}
+mycols = viridis(28, option = "B")
+ggdifftaxbar(obj=deres, xtextsize=1.5, 
+             output="IBD_biomarkder_barplot",
+             coloslist=mycols)
+```
+
+```{r}
+es_p <- ggeffectsize(obj=deres, 
+                     lineheight=0.1,
+                     linewidth=0.3) + 
+        scale_color_manual(values=c("brown3", "steelblue")) 
+ggsave("es_p.pdf", plot = es_p, path = "Figures", width = 20, height = 20, units = "cm")
+es_p
+```
+
+
