@@ -181,24 +181,17 @@ TAX <- tax_table<-(taxmat)
 data.class(TAX)
 ```
 
-##### Code below not yet used - error in line 182 ########
-
-
-
 ```{r}
 ps <- phyloseq(OTU, TAX)
 ps
 sample_names(ps)
 ```
 
-
-
 ```{r}
 library(readr)
 metadata <- read_csv("metadata.csv")
 view(metadata)
 ```
-
 
 ```{r}
 sampledata <- as.data.frame(metadata)
